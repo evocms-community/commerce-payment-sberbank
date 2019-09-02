@@ -1,9 +1,5 @@
 <?php
 
-/**
- * DRAFT, NOT FOR USE
- */
-
 namespace Commerce\Payments;
 
 class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
@@ -18,25 +14,26 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
     public function getMarkup()
     {
-        if (empty($this->getSetting('token'))) {
-            return '<span class="error" style="color: red;">' . $this->lang['payments.error_empty_token'] . '</span>';
+        if (empty($this->getSetting('token')) && empty($this->getSetting('login')) && empty($this->getSetting('password'))) {
+            return '<span class="error" style="color: red;">' . /*$this->lang['payments.error_empty_token_and_login_password']*/ 'Укажите токен или логин/пароль' . '</span>';
         }
     }
 
     public function getPaymentLink()
     {
         $processor = $this->modx->commerce->loadProcessor();
-        $order = $processor->getOrder();
-        $order_id = $order['id'];
-        $amount = $order['amount'] * 100;
-        $fields = $order['fields'];
+        $order     = $processor->getOrder();
+        $order_id  = $order['id'];
+        $amount    = $order['amount'] * 100;
+        $currency  = ci()->currency->getCurrency($order['currency']);
+        $payment   = $this->createPayment($order['id'], ci()->currency->convertToDefault($order['amount'], $currency['code']));
 
         $customer = [
-            'email' => $fields['email'],
+            'email' => $order['email'],
         ];
 
-        if (!empty($fields['phone'])) {
-            $phone = preg_replace('/[^0-9]+/', '', $fields['phone']);
+        if (!empty($order['phone'])) {
+            $phone = preg_replace('/[^0-9]+/', '', $order['phone']);
             $phone = preg_replace('/^8/', '7', $phone);
 
             if (preg_match('/^7\d{10}$/', $phone)) {
@@ -50,7 +47,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         foreach ($processor->getCart()->getItems() as $item) {
             $items[] = [
                 'positionId'  => $position++,
-                'name'        => $item['title'],
+                'name'        => $item['name'],
                 'quantity'    => [
                     'value'   => $item['count'],
                     'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
@@ -63,6 +60,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $data = [
             'orderNumber' => $order_id . '-' . time(),
             'amount'      => $amount,
+            //'currency'    => $currency['code'],
             'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/',
             'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
                 'order_id'  => $order_id,
@@ -70,7 +68,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             ]),
             'orderBundle' => json_encode([
                 'orderCreationDate' => date('c'),
-                'customerDetails' => $customer,
+                'customerDetails'   => $customer,
                 'cartItems' => [
                     'items' => $items,
                 ],
@@ -79,15 +77,21 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
         try {
             $result = $this->request('payment/rest/register.do', $data);
+
+            if (empty($result['formUrl'])) {
+                throw new \Exception('Request failed!');
+            }
         } catch (\Exception $e) {
             $this->modx->logEvent(0, 3, 'Link is not received: ' . $e->getMessage(), 'Commerce Sberbank Payment');
             exit();
         }
 
+        $this->modx->db->update(['hash' => $result['orderId']], $this->modx->getFullTablename('commerce_order_payments'), "`id` = '" . $payment['id'] . "'");
+
         return $result['formUrl'];
     }
 
-    public function handleSuccess()
+    public function handleCallback()
     {
         if (isset($_REQUEST['orderId']) && is_string($_REQUEST['orderId']) && preg_match('/^[a-z0-9-]{36}$/', $_REQUEST['orderId'])) {
             $order_id = $_REQUEST['orderId'];
@@ -97,6 +101,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                     'orderId' => $order_id,
                 ]);
             } catch (\Exception $e) {
+                $this->modx->logEvent(0, 3, 'Order status request failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                 return false;
             }
 
@@ -108,7 +113,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
     protected function getUrl($method)
     {
-        $url = 'https://3dsec.sberbank.ru/';
+        $url = $this->getSetting('debug') == 1 ? 'https://3dsec.sberbank.ru/' : 'https://securepayments.sberbank.ru/';
         return $url . $method;
     }
 
@@ -116,10 +121,16 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
     {
         $data['token'] = $this->getSetting('token');
 
+        if (empty($data['token'])) {
+            $data['userName'] = $this->getSetting('login');
+            $data['password'] = $this->getSetting('password');
+        }
+
+        $url  = $this->getUrl($method);
         $curl = curl_init();
 
         curl_setopt_array($curl, [
-            CURLOPT_URL            => $this->getUrl($method),
+            CURLOPT_URL            => $url,
             CURLOPT_POSTFIELDS     => http_build_query($data),
             CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
@@ -137,6 +148,10 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         curl_close($curl);
 
+        if (!empty($this->getSetting('debug'))) {
+            $this->modx->logEvent(0, 1, 'URL: <pre>' . $url . '</pre><br>Data: <pre>' . htmlentities(print_r($data, true)) . '</pre><br>Response: <pre>' . $code . "\n" . htmlentities(print_r($result, true)) . '</pre><br>', 'Commerce Sberbank Payment Debug');
+        }
+
         if ($code != 200) {
             $this->modx->logEvent(0, 3, 'Server is not responding', 'Commerce Sberbank Payment');
             return false;
@@ -144,11 +159,20 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
         $result = json_decode($result, true);
 
-        if (isset($result['errorMessage'])) {
+        if (!empty($result['errorCode']) && isset($result['errorMessage'])) {
             $this->modx->logEvent(0, 3, 'Server return error: ' . $result['errorMessage'], 'Commerce Sberbank Payment');
             return false;
         }
 
         return $result;
+    }
+
+    public function getRequestPaymentHash()
+    {
+        if (isset($_REQUEST['orderId']) && is_scalar($_REQUEST['orderId'])) {
+            return $_REQUEST['orderId'];
+        }
+
+        return null;
     }
 }
