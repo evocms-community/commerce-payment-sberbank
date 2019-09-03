@@ -39,10 +39,11 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             }
         }
 
-        $items = [];
+        $cart = $processor->getCart();
+        $items = $subtotals = [];
         $position = 1;
 
-        foreach ($processor->getCart()->getItems() as $item) {
+        foreach ($cart->getItems() as $item) {
             $items[] = [
                 'positionId'  => $position++,
                 'name'        => $item['name'],
@@ -51,6 +52,21 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                     'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
                 ],
                 'itemAmount'  => $item['price'] * $item['count'] * 100,
+                'itemCode'    => $item['id'],
+            ];
+        }
+
+        $cart->getSubtotals($subtotals, $total);
+
+        foreach ($subtotals as $item) {
+            $items[] = [
+                'positionId'  => $position++,
+                'name'        => $item['title'],
+                'quantity'    => [
+                    'value'   => 1,
+                    'measure' => '-',
+                ],
+                'itemAmount'  => $item['price'] * 100,
                 'itemCode'    => $item['id'],
             ];
         }

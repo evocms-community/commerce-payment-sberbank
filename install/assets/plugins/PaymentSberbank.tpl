@@ -5,7 +5,7 @@
  * Sberbank payments processing
  *
  * @category    plugin
- * @version     0.1.2
+ * @version     0.1.3
  * @author      mnoskov
  * @internal    @events OnRegisterPayments,OnBeforeOrderSending
  * @internal    @properties &title=Название;text; &token=Токен;text; &login=Логин;text; &password=Пароль;text; &debug=Отладка запросов;list;Нет==0||Да==1;0 &test=Тестовый доступ;list;Нет==0||Да==1;1
