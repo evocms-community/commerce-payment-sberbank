@@ -4,18 +4,16 @@ namespace Commerce\Payments;
 
 class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 {
-    public function init()
+    public function __construct($modx, array $params = [])
     {
-        return [
-            'code'  => 'sberbank',
-            'title' => $this->lang['payments.sberbank_title'],
-        ];
+        parent::__construct($modx, $params);
+        $this->lang = $modx->commerce->getUserLanguage('sberbank');
     }
 
     public function getMarkup()
     {
-        if (empty($this->getSetting('token')) && empty($this->getSetting('login')) && empty($this->getSetting('password'))) {
-            return '<span class="error" style="color: red;">' . /*$this->lang['payments.error_empty_token_and_login_password']*/ 'Укажите токен или логин/пароль' . '</span>';
+        if (empty($this->getSetting('token')) && (empty($this->getSetting('login')) || empty($this->getSetting('password')))) {
+            return '<span class="error" style="color: red;">' . $this->lang['sberbank.error_empty_token_and_login_password'] . '</span>';
         }
     }
 
@@ -60,7 +58,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $data = [
             'orderNumber' => $order_id . '-' . time(),
             'amount'      => $amount,
-            //'currency'    => $currency['code'],
+            //'currency'    => $currency['code'], // нужен числовой код
             'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/',
             'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
                 'order_id'  => $order_id,
@@ -94,18 +92,35 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
     public function handleCallback()
     {
         if (isset($_REQUEST['orderId']) && is_string($_REQUEST['orderId']) && preg_match('/^[a-z0-9-]{36}$/', $_REQUEST['orderId'])) {
-            $order_id = $_REQUEST['orderId'];
+            $payment_hash = $_REQUEST['orderId'];
 
             try {
                 $status = $this->request('payment/rest/getOrderStatusExtended.do', [
-                    'orderId' => $order_id,
+                    'orderId' => $payment_hash,
                 ]);
             } catch (\Exception $e) {
                 $this->modx->logEvent(0, 3, 'Order status request failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                 return false;
             }
 
-            return $status['errorCode'] == 0;
+            if (empty($status['errorCode'])) {
+                $processor = $this->modx->commerce->loadProcessor();
+
+                try {
+                    $payment = $processor->loadPaymentByHash($payment_hash);
+
+                    if ($payment === null) {
+                        throw new \Exception('Payment ' . $payment_hash . ' not found');
+                    }
+
+                    $processor->processPayment($payment, floatval($status['amount']));
+                } catch (\Exception $e) {
+                    $this->modx->logEvent(0, 3, 'Payment process failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
+                    return false;
+                }
+
+                $this->modx->sendRedirect(MODX_BASE_URL . 'commerce/sberbank/payment-success?orderId=' . $payment_hash);
+            }
         }
 
         return false;
@@ -113,7 +128,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
     protected function getUrl($method)
     {
-        $url = $this->getSetting('debug') == 1 ? 'https://3dsec.sberbank.ru/' : 'https://securepayments.sberbank.ru/';
+        $url = $this->getSetting('test') == 1 ? 'https://3dsec.sberbank.ru/' : 'https://securepayments.sberbank.ru/';
         return $url . $method;
     }
 

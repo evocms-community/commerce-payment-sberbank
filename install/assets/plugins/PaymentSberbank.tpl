@@ -8,7 +8,7 @@
  * @version     0.1.2
  * @author      mnoskov
  * @internal    @events OnRegisterPayments,OnBeforeOrderSending
- * @internal    @properties &title=Название;text; &token=Токен;text; &login=Логин;text; &password=Пароль;text; &debug=Отладка;list;Нет==0||Да==1;0 
+ * @internal    @properties &title=Название;text; &token=Токен;text; &login=Логин;text; &password=Пароль;text; &debug=Отладка запросов;list;Нет==0||Да==1;0 &test=Тестовый доступ;list;Нет==0||Да==1;1 
  * @internal    @modx_category Commerce
  * @internal    @installset base
 */
@@ -19,8 +19,8 @@ if (!empty($modx->commerce)) {
             $class = new \Commerce\Payments\SberbankPayment($modx, $params);
 
             if (empty($params['title'])) {
-                $lang = $modx->commerce->getUserLanguage('payments');
-                $params['title'] = $lang['payments.sberbank_title'];
+                $lang = $modx->commerce->getUserLanguage('sberbank');
+                $params['title'] = $lang['sberbank.caption'];
             }
 
             $modx->commerce->registerPayment('sberbank', $params['title'], $class);
