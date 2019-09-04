@@ -129,7 +129,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                         throw new \Exception('Payment ' . $payment_hash . ' not found');
                     }
 
-                    $processor->processPayment($payment, floatval($status['amount']));
+                    $processor->processPayment($payment, floatval($status['amount']) * 0.01);
                 } catch (\Exception $e) {
                     $this->modx->logEvent(0, 3, 'Payment process failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                     return false;
