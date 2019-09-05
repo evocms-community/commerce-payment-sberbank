@@ -29,7 +29,10 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $data = [
             'orderNumber' => $order_id . '-' . time(),
             'amount'      => $amount,
-            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/',
+            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/?' . http_build_query([
+                'paymentId'   => $payment['id'],
+                'paymentHash' => $payment['hash'],
+            ]),
             'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
                 'order_id'  => $order_id,
                 'site_name' => $this->modx->getConfig('site_name'),
@@ -106,42 +109,32 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             return false;
         }
 
-        $this->modx->db->update(['hash' => $result['orderId']], $this->modx->getFullTablename('commerce_order_payments'), "`id` = '" . $payment['id'] . "'");
-
         return $result['formUrl'];
     }
 
     public function handleCallback()
     {
         if (isset($_REQUEST['orderId']) && is_string($_REQUEST['orderId']) && preg_match('/^[a-z0-9-]{36}$/', $_REQUEST['orderId'])) {
-            $payment_hash = $_REQUEST['orderId'];
+            $order_id = $_REQUEST['orderId'];
 
             try {
                 $status = $this->request('payment/rest/getOrderStatusExtended.do', [
-                    'orderId' => $payment_hash,
+                    'orderId' => $order_id,
                 ]);
             } catch (\Exception $e) {
                 $this->modx->logEvent(0, 3, 'Order status request failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                 return false;
             }
 
-            if (empty($status['errorCode'])) {
-                $processor = $this->modx->commerce->loadProcessor();
-
+            if (empty($status['errorCode']) && !empty($_REQUEST['paymentId']) && !empty($_REQUEST['paymentHash'])) {
                 try {
-                    $payment = $processor->loadPaymentByHash($payment_hash);
-
-                    if ($payment === null) {
-                        throw new \Exception('Payment ' . $payment_hash . ' not found');
-                    }
-
-                    $processor->processPayment($payment, floatval($status['amount']) * 0.01);
+                    $this->modx->commerce->loadProcessor()->processPayment($_REQUEST['paymentId'], floatval($status['amount']) * 0.01);
                 } catch (\Exception $e) {
                     $this->modx->logEvent(0, 3, 'Payment process failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                     return false;
                 }
 
-                $this->modx->sendRedirect(MODX_BASE_URL . 'commerce/sberbank/payment-success?orderId=' . $payment_hash);
+                $this->modx->sendRedirect(MODX_BASE_URL . 'commerce/sberbank/payment-success?paymentHash=' . $_REQUEST['paymentHash']);
             }
         }
 
@@ -206,8 +199,8 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
     public function getRequestPaymentHash()
     {
-        if (isset($_REQUEST['orderId']) && is_scalar($_REQUEST['orderId'])) {
-            return $_REQUEST['orderId'];
+        if (isset($_REQUEST['paymentHash']) && is_scalar($_REQUEST['paymentHash'])) {
+            return $_REQUEST['paymentHash'];
         }
 
         return null;
