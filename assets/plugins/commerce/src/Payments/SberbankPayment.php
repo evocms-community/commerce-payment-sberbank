@@ -26,9 +26,21 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $currency  = ci()->currency->getCurrency($order['currency']);
         $payment   = $this->createPayment($order['id'], ci()->currency->convertToDefault($order['amount'], $currency['code']));
 
-        $customer = [
-            'email' => $order['email'],
+        $data = [
+            'orderNumber' => $order_id . '-' . time(),
+            'amount'      => $amount,
+            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/',
+            'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
+                'order_id'  => $order_id,
+                'site_name' => $this->modx->getConfig('site_name'),
+            ]),
         ];
+
+        $customer = [];
+
+        if (!empty($order['email']) && filter_var($order['email'], FILTER_VALIDATE_EMAIL)) {
+            $customer['email'] = $order['email'];
+        }
 
         if (!empty($order['phone'])) {
             $phone = preg_replace('/[^0-9]+/', '', $order['phone']);
@@ -39,55 +51,49 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             }
         }
 
-        $cart = $processor->getCart();
-        $items = $subtotals = [];
-        $position = 1;
+        if (!empty($customer)) {
+            $cart = $processor->getCart();
+            $items = $subtotals = [];
+            $position = 1;
 
-        foreach ($cart->getItems() as $item) {
-            $items[] = [
-                'positionId'  => $position++,
-                'name'        => $item['name'],
-                'quantity'    => [
-                    'value'   => $item['count'],
-                    'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
-                ],
-                'itemAmount'  => $item['price'] * $item['count'] * 100,
-                'itemCode'    => $item['id'],
-            ];
-        }
+            foreach ($cart->getItems() as $item) {
+                $items[] = [
+                    'positionId'  => $position++,
+                    'name'        => $item['name'],
+                    'quantity'    => [
+                        'value'   => $item['count'],
+                        'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
+                    ],
+                    'itemAmount'  => $item['price'] * $item['count'] * 100,
+                    'itemCode'    => $item['id'],
+                ];
+            }
 
-        $cart->getSubtotals($subtotals, $total);
+            $cart->getSubtotals($subtotals, $total);
 
-        foreach ($subtotals as $item) {
-            $items[] = [
-                'positionId'  => $position++,
-                'name'        => $item['title'],
-                'quantity'    => [
-                    'value'   => 1,
-                    'measure' => '-',
-                ],
-                'itemAmount'  => $item['price'] * 100,
-                'itemCode'    => $item['id'],
-            ];
-        }
+            foreach ($subtotals as $item) {
+                $items[] = [
+                    'positionId'  => $position++,
+                    'name'        => $item['title'],
+                    'quantity'    => [
+                        'value'   => 1,
+                        'measure' => '-',
+                    ],
+                    'itemAmount'  => $item['price'] * 100,
+                    'itemCode'    => $item['id'],
+                ];
+            }
 
-        $data = [
-            'orderNumber' => $order_id . '-' . time(),
-            'amount'      => $amount,
-            //'currency'    => $currency['code'], // нужен числовой код
-            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/',
-            'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
-                'order_id'  => $order_id,
-                'site_name' => $this->modx->getConfig('site_name'),
-            ]),
-            'orderBundle' => json_encode([
+            $data['orderBundle'] = json_encode([
                 'orderCreationDate' => date('c'),
                 'customerDetails'   => $customer,
                 'cartItems' => [
                     'items' => $items,
                 ],
-            ]),
-        ];
+            ]);
+        } else if (!empty($this->getSetting('debug'))) {
+            $this->modx->logEvent(0, 2, 'User credentials not found in order: <pre>' . htmlentities(print_r($order, true)) . '</pre>', 'Commerce Sberbank Payment Debug');
+        }
 
         try {
             $result = $this->request('payment/rest/register.do', $data);
@@ -97,7 +103,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             }
         } catch (\Exception $e) {
             $this->modx->logEvent(0, 3, 'Link is not received: ' . $e->getMessage(), 'Commerce Sberbank Payment');
-            exit();
+            return false;
         }
 
         $this->modx->db->update(['hash' => $result['orderId']], $this->modx->getFullTablename('commerce_order_payments'), "`id` = '" . $payment['id'] . "'");
