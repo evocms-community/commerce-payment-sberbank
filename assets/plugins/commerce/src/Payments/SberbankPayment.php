@@ -4,6 +4,14 @@ namespace Commerce\Payments;
 
 class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 {
+    private $codes = [
+        'USD' => 840,
+        'EUR' => 978,
+        'RUB' => 643,
+        'RUR' => 643,
+        'BYN' => 933,
+    ];
+
     public function __construct($modx, array $params = [])
     {
         parent::__construct($modx, $params);
@@ -26,19 +34,6 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $currency  = ci()->currency->getCurrency($order['currency']);
         $payment   = $this->createPayment($order['id'], ci()->currency->convertToDefault($order['amount'], $currency['code']));
 
-        $data = [
-            'orderNumber' => $order_id . '-' . time(),
-            'amount'      => $amount,
-            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/?' . http_build_query([
-                'paymentId'   => $payment['id'],
-                'paymentHash' => $payment['hash'],
-            ]),
-            'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
-                'order_id'  => $order_id,
-                'site_name' => $this->modx->getConfig('site_name'),
-            ]),
-        ];
-
         $customer = [];
 
         if (!empty($order['email']) && filter_var($order['email'], FILTER_VALIDATE_EMAIL)) {
@@ -54,6 +49,41 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             }
         }
 
+        $params = [
+            'CMS' => 'Evolution CMS ' . $this->modx->getConfig('settings_version'),
+        ];
+
+        foreach (['email', 'phone'] as $field) {
+            if (isset($customer[$field])) {
+                $params[$field] = $customer[$field];
+            }
+        }
+
+        $currency = ci()->currency->getCurrencyCode();
+
+        if (isset($this->codes[$currency])) {
+            $currency = $this->codes[$currency];
+        } else {
+            $this->modx->logEvent(0, 3, 'Unknown currency: ' . print_r($currency, true), 'Commerce Sberbank Payment');
+            return false;
+        }
+
+        $data = [
+            'orderNumber' => $order_id . '-' . time(),
+            'amount'      => $amount,
+            'currency'    => $currency,
+            'language'    => 'ru',
+            'jsonParams'  => json_encode($params),
+            'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/?' . http_build_query([
+                'paymentId'   => $payment['id'],
+                'paymentHash' => $payment['hash'],
+            ]),
+            'description' => ci()->tpl->parseChunk($this->lang['payments.payment_description'], [
+                'order_id'  => $order_id,
+                'site_name' => $this->modx->getConfig('site_name'),
+            ]),
+        ];
+
         if (!empty($customer)) {
             $cart = $processor->getCart();
             $items = $subtotals = [];
@@ -68,6 +98,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                         'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
                     ],
                     'itemAmount'  => $item['price'] * $item['count'] * 100,
+                    'itemPrice'   => $item['price'] * 100,
                     'itemCode'    => $item['id'],
                 ];
             }
@@ -83,6 +114,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                         'measure' => '-',
                     ],
                     'itemAmount'  => $item['price'] * 100,
+                    'itemPrice'   => $item['price'] * 100,
                     'itemCode'    => $item['id'],
                 ];
             }
