@@ -158,7 +158,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                 return false;
             }
 
-            if (empty($status['errorCode']) && !empty($_REQUEST['paymentId']) && !empty($_REQUEST['paymentHash'])) {
+            if (empty($status['errorCode']) && !empty($status['orderStatus']) && in_array($status['orderStatus'], [1, 2]) && !empty($_REQUEST['paymentId']) && !empty($_REQUEST['paymentHash'])) {
                 try {
                     $this->modx->commerce->loadProcessor()->processPayment($_REQUEST['paymentId'], floatval($status['amount']) * 0.01);
                 } catch (\Exception $e) {
