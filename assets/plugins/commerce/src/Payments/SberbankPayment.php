@@ -30,7 +30,6 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $processor = $this->modx->commerce->loadProcessor();
         $order     = $processor->getOrder();
         $order_id  = $order['id'];
-        $amount    = $order['amount'] * 100;
         $currency  = ci()->currency->getCurrency($order['currency']);
         $payment   = $this->createPayment($order['id'], ci()->currency->convertToDefault($order['amount'], $currency['code']));
 
@@ -70,7 +69,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
         $data = [
             'orderNumber' => $order_id . '-' . time(),
-            'amount'      => $amount,
+            'amount'      => $payment['amount'] * 100,
             'currency'    => $currency,
             'language'    => 'ru',
             'jsonParams'  => json_encode($params),
@@ -85,35 +84,25 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         ];
 
         if (!empty($customer)) {
-            $cart = $processor->getCart();
-            $items = $subtotals = [];
-            $position = 1;
+            $items = $this->prepareItems($processor->getCart());
 
-            foreach ($cart->getItems() as $item) {
-                $items[] = [
-                    'positionId'  => $position++,
+            $isPartialPayment = $payment['amount'] < $order['amount'];
+
+            if ($isPartialPayment) {
+                $items = $this->decreaseItemsAmount($items, $order['amount'], $payment['amount']);
+            }
+
+            $products = [];
+
+            foreach ($items as $i => $item) {
+                $products[] = [
+                    'positionId'  => $i + 1,
                     'name'        => $item['name'],
                     'quantity'    => [
                         'value'   => $item['count'],
-                        'measure' => isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'],
+                        'measure' => $item['product'] ? isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'] : '-',
                     ],
-                    'itemAmount'  => $item['price'] * $item['count'] * 100,
-                    'itemPrice'   => $item['price'] * 100,
-                    'itemCode'    => $item['id'],
-                ];
-            }
-
-            $cart->getSubtotals($subtotals, $total);
-
-            foreach ($subtotals as $item) {
-                $items[] = [
-                    'positionId'  => $position++,
-                    'name'        => $item['title'],
-                    'quantity'    => [
-                        'value'   => 1,
-                        'measure' => '-',
-                    ],
-                    'itemAmount'  => $item['price'] * 100,
+                    'itemAmount'  => $item['total'] * 100,
                     'itemPrice'   => $item['price'] * 100,
                     'itemCode'    => $item['id'],
                 ];
@@ -123,7 +112,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                 'orderCreationDate' => date('c'),
                 'customerDetails'   => $customer,
                 'cartItems' => [
-                    'items' => $items,
+                    'items' => $products,
                 ],
             ]);
         } else if (!empty($this->getSetting('debug'))) {
