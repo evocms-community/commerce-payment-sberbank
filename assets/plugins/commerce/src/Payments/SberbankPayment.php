@@ -4,14 +4,6 @@ namespace Commerce\Payments;
 
 class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 {
-    private $codes = [
-        'USD' => 840,
-        'EUR' => 978,
-        'RUB' => 643,
-        'RUR' => 643,
-        'BYN' => 933,
-    ];
-
     public function __construct($modx, array $params = [])
     {
         parent::__construct($modx, $params);
@@ -31,7 +23,13 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $order     = $processor->getOrder();
         $order_id  = $order['id'];
         $currency  = ci()->currency->getCurrency($order['currency']);
-        $payment   = $this->createPayment($order['id'], ci()->currency->convertToDefault($order['amount'], $currency['code']));
+
+        try {
+            $payment = $this->createPayment($order['id'], ci()->currency->convert($order['amount'], $currency['code'], 'RUB'));
+        } catch (\Exception $e) {
+            $this->modx->logEvent(0, 3, 'Failed to create payment: ' . $e->getMessage() . '<br>Data: <pre>' . htmlentities(print_r($order, true)) . '</pre>', 'Commerce Sberbank Payment');
+            return false;
+        }
 
         $customer = [];
 
@@ -58,19 +56,10 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
             }
         }
 
-        $currency = ci()->currency->getCurrencyCode();
-
-        if (isset($this->codes[$currency])) {
-            $currency = $this->codes[$currency];
-        } else {
-            $this->modx->logEvent(0, 3, 'Unknown currency: ' . print_r($currency, true), 'Commerce Sberbank Payment');
-            return false;
-        }
-
         $data = [
             'orderNumber' => $order_id . '-' . time(),
             'amount'      => $payment['amount'] * 100,
-            'currency'    => $currency,
+            'currency'    => 643,
             'language'    => 'ru',
             'jsonParams'  => json_encode($params),
             'returnUrl'   => $this->modx->getConfig('site_url') . 'commerce/sberbank/payment-process/?' . http_build_query([
@@ -84,7 +73,9 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         ];
 
         if (!empty($customer)) {
-            $items = $this->prepareItems($processor->getCart());
+            $cart = $processor->getCart();
+            $cart->setCurrency('RUB');
+            $items = $this->prepareItems($cart);
 
             $isPartialPayment = $payment['amount'] < $order['amount'];
 
@@ -149,7 +140,11 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
             if (empty($status['errorCode']) && !empty($status['orderStatus']) && in_array($status['orderStatus'], [1, 2]) && !empty($_REQUEST['paymentId']) && !empty($_REQUEST['paymentHash'])) {
                 try {
-                    $this->modx->commerce->loadProcessor()->processPayment($_REQUEST['paymentId'], floatval($status['amount']) * 0.01);
+                    $processor = $this->modx->commerce->loadProcessor();
+                    $payment   = $processor->loadPayment($_REQUEST['paymentId']);
+                    $order     = $processor->loadOrder($payment['order_id']);
+
+                    $processor->processPayment($payment, ci()->currency->convert(floatval($status['amount']) * 0.01, 'RUB', $order['currency']));
                 } catch (\Exception $e) {
                     $this->modx->logEvent(0, 3, 'Payment process failed: ' . $e->getMessage(), 'Commerce Sberbank Payment');
                     return false;
