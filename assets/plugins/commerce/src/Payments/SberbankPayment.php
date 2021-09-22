@@ -58,7 +58,7 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
         $data = [
             'orderNumber' => $order_id . '-' . time(),
-            'amount'      => $payment['amount'] * 100,
+            'amount'      => (int) round($payment['amount'] * 100),
             'currency'    => 643,
             'language'    => 'ru',
             'jsonParams'  => json_encode($params),
@@ -93,8 +93,8 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
                         'value'   => $item['count'],
                         'measure' => $item['product'] ? isset($meta['measurements']) ? $meta['measurements'] : $this->lang['measures.units'] : '-',
                     ],
-                    'itemAmount'  => $item['total'] * 100,
-                    'itemPrice'   => $item['price'] * 100,
+                    'itemAmount'  => (int) round($item['total'] * 100),
+                    'itemPrice'   => (int) round($item['price'] * 100),
                     'itemCode'    => $item['id'],
                 ];
             }
