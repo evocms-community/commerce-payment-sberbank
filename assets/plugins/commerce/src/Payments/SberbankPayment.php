@@ -24,8 +24,10 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
         $order_id  = $order['id'];
         $currency  = ci()->currency->getCurrency($order['currency']);
 
+        $amount = ci()->currency->convert($order['amount'], $currency['code'], 'RUB');
+
         try {
-            $payment = $this->createPayment($order['id'], ci()->currency->convert($order['amount'], $currency['code'], 'RUB'));
+            $payment = $this->createPayment($order['id'], $amount);
         } catch (\Exception $e) {
             $this->modx->logEvent(0, 3, 'Failed to create payment: ' . $e->getMessage() . '<br>Data: <pre>' . htmlentities(print_r($order, true)) . '</pre>', 'Commerce Sberbank Payment');
             return false;
@@ -74,13 +76,12 @@ class SberbankPayment extends Payment implements \Commerce\Interfaces\Payment
 
         if (!empty($customer)) {
             $cart = $processor->getCart();
-            $cart->setCurrency('RUB');
-            $items = $this->prepareItems($cart);
+            $items = $this->prepareItems($cart, $currency['code'], 'RUB');
 
-            $isPartialPayment = $payment['amount'] < $order['amount'];
+            $isPartialPayment = abs($amount - $payment['amount']) > 0.01;
 
             if ($isPartialPayment) {
-                $items = $this->decreaseItemsAmount($items, $order['amount'], $payment['amount']);
+                $items = $this->decreaseItemsAmount($items, $amount, $payment['amount']);
             }
 
             $products = [];
